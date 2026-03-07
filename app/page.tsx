@@ -6,7 +6,7 @@ export default function WeatherShelterPage() {
       {/* 상단 헤더 */}
       <header className="flex justify-between items-center p-4 bg-white">
         <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs">O</div>
-        <h1 className="font-bold text-lg">실라장이</h1>
+        <h1 className="font-bold text-lg">쉴라잡이</h1>
         <button className="text-gray-500">⚙️</button>
       </header>
 
