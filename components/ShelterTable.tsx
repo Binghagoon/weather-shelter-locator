@@ -1,32 +1,58 @@
 import { JSX } from "react";
 
+interface Shelter {
+  name: string;
+  address: string;
+  distance: string;
+}
+
+const hotShelters: Shelter[] = [
+  {
+    name: "중앙도서관 무더위쉼터",
+    address: "서울특별시 강남구 테헤란로 123",
+    distance: "0.3km",
+  },
+  {
+    name: "구민체육센터",
+    address: "서울특별시 강남구 대치동 234",
+    distance: "1.2km",
+  },
+];
+const coldShelters: Shelter[] = [
+  {
+    name: "시민회관 한파쉼터",
+    address: "서울특별시 강남구 역삼동 456",
+    distance: "0.5km",
+  },
+  {
+    name: "구민체육센터",
+    address: "서울특별시 강남구 대치동 234",
+    distance: "1.2km",
+  },
+];
+
 export function ShelterTable({
   activeTab,
 }: {
   activeTab: "폭염" | "한파";
 }): JSX.Element {
+  const shelters = activeTab === "폭염" ? hotShelters : coldShelters;
+
   return (
     <>
       <h3 className="text-sm font-bold text-gray-600 mb-3 px-1">
         가까운 {activeTab} 쉼터
       </h3>
       <div className="space-y-3">
-        <ShelterItem
-          name={
-            activeTab === "폭염" ? "중앙도서관 무더위쉼터" : "시민회관 한파쉼터"
-          }
-          address="서울특별시 강남구 테헤란로 123"
-          distance="0.3km"
-          onClick={() =>
-            handleRouteClick(activeTab === "폭염" ? "중앙도서관" : "시민회관")
-          }
-        />
-        <ShelterItem
-          name="구민체육센터"
-          address="서울특별시 강남구 대치동 234"
-          distance="1.2km"
-          onClick={() => handleRouteClick("구민체육센터")}
-        />
+        {shelters.map(({ name, address, distance }) => (
+          <ShelterItem
+            key={name}
+            name={name}
+            address={address}
+            distance={distance}
+            onClick={() => handleRouteClick(name)}
+          />
+        ))}
       </div>
     </>
   );
