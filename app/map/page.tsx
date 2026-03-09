@@ -1,18 +1,149 @@
-'use client'
+/* eslint-disable @typescript-eslint/no-empty-object-type */
+"use client";
 import React, { useEffect, useRef, useState } from "react";
 
-var window:any = window || {};
-const newWindow: any = window as any;
+type ConfettiFn = (options: {
+  particleCount: number;
+  spread: number;
+  origin: { y: number };
+  zIndex: number;
+}) => void;
+
+interface KakaoSize {}
+interface KakaoPoint {}
+
+interface KakaoLatLng {
+  getLat(): number;
+  getLng(): number;
+}
+
+interface KakaoLatLngBounds {
+  extend(position: KakaoLatLng): void;
+}
+
+interface KakaoMap {
+  setCenter(position: KakaoLatLng): void;
+  setBounds(bounds: KakaoLatLngBounds): void;
+}
+
+interface KakaoMarker {
+  setPosition(position: KakaoLatLng): void;
+}
+
+interface KakaoPolyline {
+  getPath(): KakaoLatLng[];
+  setMap(map: KakaoMap | null): void;
+}
+
+interface KakaoInfoWindow {
+  open(map: KakaoMap, marker: KakaoMarker): void;
+  close(): void;
+}
+
+interface KakaoMapsApi {
+  LatLng: new (lat: number, lng: number) => KakaoLatLng;
+  Map: new (
+    container: HTMLElement,
+    options: { center: KakaoLatLng; level: number },
+  ) => KakaoMap;
+  Marker: new (options: {
+    position: KakaoLatLng;
+    map: KakaoMap | null;
+    image?: unknown;
+  }) => KakaoMarker;
+  MarkerImage: new (
+    src: string,
+    size: KakaoSize,
+    options?: { offset: KakaoPoint },
+  ) => unknown;
+  Size: new (width: number, height: number) => KakaoSize;
+  Point: new (x: number, y: number) => KakaoPoint;
+  Polyline: new (options: {
+    path: KakaoLatLng[];
+    strokeWeight: number;
+    strokeColor: string;
+    strokeOpacity: number;
+  }) => KakaoPolyline;
+  LatLngBounds: new () => KakaoLatLngBounds;
+  InfoWindow: new (options: {
+    content: HTMLElement;
+    removable: boolean;
+  }) => KakaoInfoWindow;
+  event: {
+    addListener(target: unknown, eventName: string, handler: () => void): void;
+  };
+  load(callback: () => void): void;
+}
+
+type AppWindow = Window & {
+  kakao: { maps: KakaoMapsApi };
+  confetti?: ConfettiFn;
+};
+
+interface Shelter {
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+interface RouteStep {
+  lat: number;
+  lng: number;
+  instruction: string;
+}
+
+interface NavigationState {
+  myMarker: KakaoMarker | null;
+  polyline: KakaoPolyline | null;
+  routeSteps: RouteStep[];
+  lastSpokenStep: number;
+  watchId: number | null;
+  isArrived: boolean;
+  isRerouting: boolean;
+  currentEndLat: number;
+  currentEndLng: number;
+  currentShelterName: string;
+  openedInfowindows: KakaoInfoWindow[];
+  selectedVoice: SpeechSynthesisVoice | null;
+}
+
+interface OsrmStep {
+  distance: number;
+  maneuver: {
+    type: string;
+    modifier?: string;
+    location: [number, number];
+  };
+}
+
+interface OsrmRoute {
+  distance: number;
+  geometry: {
+    coordinates: [number, number][];
+  };
+  legs: Array<{
+    steps: OsrmStep[];
+  }>;
+}
+
+interface OsrmResponse {
+  code: string;
+  routes: OsrmRoute[];
+}
+const appWindow =
+  typeof window !== "undefined"
+    ? (window as unknown as AppWindow)
+    : ({} as AppWindow);
 
 export default function MapNavigation() {
-  const mapContainer = useRef<any>(null);
-  const mapInstance = useRef<any>(null);
-  const [subtitle, setSubtitle] = useState<any>("주변 쉼터를 찾는 중...");
-  const [fontSize, setFontSize] = useState<any>(20);
-  const [showWelcome, setShowWelcome] = useState<any>(true);
-  const [isOffline, setIsOffline] = useState<any>(false);
+  const mapContainer = useRef<HTMLDivElement | null>(null);
+  const mapInstance = useRef<KakaoMap | null>(null);
+  const [subtitle, setSubtitle] = useState<string>("주변 쉼터를 찾는 중...");
+  const [fontSize, setFontSize] = useState<number>(20);
+  const [showWelcome, setShowWelcome] = useState<boolean>(true);
+  const [isOffline, setIsOffline] = useState<boolean>(false);
 
-  const state = useRef<any>({
+  const state = useRef<NavigationState>({
     myMarker: null,
     polyline: null,
     routeSteps: [],
@@ -24,7 +155,7 @@ export default function MapNavigation() {
     currentEndLng: 0,
     currentShelterName: "",
     openedInfowindows: [],
-    selectedVoice: null as any,
+    selectedVoice: null,
   });
 
   const arrowImage =
@@ -33,9 +164,10 @@ export default function MapNavigation() {
   const loadVoices = () => {
     const voices = window.speechSynthesis.getVoices();
     state.current.selectedVoice =
-      voices.find((v: any) => v.name.includes("Google") && v.lang === "ko-KR") ||
-      voices.find((v: any) => v.name.includes("Yuna") && v.lang === "ko-KR") ||
-      voices.find((v: any) => v.lang === "ko-KR" || v.lang.includes("ko"));
+      voices.find((v) => v.name.includes("Google") && v.lang === "ko-KR") ||
+      voices.find((v) => v.name.includes("Yuna") && v.lang === "ko-KR") ||
+      voices.find((v) => v.lang === "ko-KR" || v.lang.includes("ko")) ||
+      null;
   };
 
   const speak = (text: string) => {
@@ -56,24 +188,43 @@ export default function MapNavigation() {
     window.speechSynthesis.speak(msg);
   };
 
-  const getDistance = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+  const getDistance = (
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ) => {
     const R = 6371;
     const dLat = (lat2 - lat1) * (Math.PI / 180);
     const dLon = (lng2 - lng1) * (Math.PI / 180);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) ** 2;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * (Math.PI / 180)) *
+        Math.cos(lat2 * (Math.PI / 180)) *
+        Math.sin(dLon / 2) ** 2;
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))) * 1000;
   };
 
   const startApp = () => {
     setShowWelcome(false);
+    const map = mapInstance.current;
+    if (!map) return;
+
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((pos) => {
-        const locPos = newWindow.kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
-        mapInstance.current.setCenter(locPos);
+        const locPos = new appWindow.kakao.maps.LatLng(
+          pos.coords.latitude,
+          pos.coords.longitude,
+        );
+        map.setCenter(locPos);
         if (!state.current.myMarker) {
-          state.current.myMarker = new newWindow.kakao.maps.Marker({
-            position: locPos, map: mapInstance.current,
-            image: new newWindow.kakao.maps.MarkerImage("https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/marker_red.png", new newWindow.kakao.maps.Size(35, 35))
+          state.current.myMarker = new appWindow.kakao.maps.Marker({
+            position: locPos,
+            map,
+            image: new appWindow.kakao.maps.MarkerImage(
+              "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/marker_red.png",
+              new appWindow.kakao.maps.Size(35, 35),
+            ),
           });
         }
         speak("내 위치를 확인했습니다. 가고 싶은 쉼터를 눌러보세요.");
@@ -82,59 +233,125 @@ export default function MapNavigation() {
   };
 
   const startTracking = () => {
-    if (state.current.watchId) navigator.geolocation.clearWatch(state.current.watchId);
-    state.current.watchId = navigator.geolocation.watchPosition((pos) => {
-      const { latitude: curLat, longitude: curLng, heading } = pos.coords;
-      const locPos = newWindow.kakao.maps.LatLng(curLat, curLng);
+    if (state.current.watchId)
+      navigator.geolocation.clearWatch(state.current.watchId);
+    state.current.watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude: curLat, longitude: curLng } = pos.coords;
+        const locPos = new appWindow.kakao.maps.LatLng(curLat, curLng);
 
-      if (state.current.myMarker) {
-        state.current.myMarker.setPosition(locPos);
-      } else {
-        state.current.myMarker = new newWindow.kakao.maps.Marker({
-          position: locPos, map: mapInstance.current,
-          image: new newWindow.kakao.maps.MarkerImage(arrowImage, new newWindow.kakao.maps.Size(40, 40), { offset: new newWindow.kakao.maps.Point(20, 20) }),
-        });
-      }
+        if (state.current.myMarker) {
+          state.current.myMarker.setPosition(locPos);
+        } else {
+          state.current.myMarker = new appWindow.kakao.maps.Marker({
+            position: locPos,
+            map: mapInstance.current,
+            image: new appWindow.kakao.maps.MarkerImage(
+              arrowImage,
+              new appWindow.kakao.maps.Size(40, 40),
+              { offset: new appWindow.kakao.maps.Point(20, 20) },
+            ),
+          });
+        }
 
-      const distToFinal = getDistance(curLat, curLng, state.current.currentEndLat, state.current.currentEndLng);
-      if (distToFinal < 20 && !state.current.isArrived) {
-        state.current.isArrived = true;
-        speak(`${state.current.currentShelterName}에 잘 도착하셨습니다. 안내를 종료합니다.`);
-        if (newWindow.confetti) newWindow.confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 }, zIndex: 10001 });
-        navigator.geolocation.clearWatch(state.current.watchId);
-        return;
-      }
-
-      if (state.current.polyline && !state.current.isRerouting) {
-        const path = state.current.polyline.getPath();
-        let minDistance = Infinity;
-        path.forEach((p: any) => {
-          const d = getDistance(curLat, curLng, p.getLat(), p.getLng());
-          if (d < minDistance) minDistance = d;
-        });
-        if (minDistance > 50) {
-          state.current.isRerouting = true;
-          speak("경로를 벗어났습니다. 현재 위치에서 다시 길을 찾습니다.");
-          findRoute(state.current.currentEndLat, state.current.currentEndLng, state.current.currentShelterName);
+        const distToFinal = getDistance(
+          curLat,
+          curLng,
+          state.current.currentEndLat,
+          state.current.currentEndLng,
+        );
+        if (distToFinal < 20 && !state.current.isArrived) {
+          state.current.isArrived = true;
+          speak(
+            `${state.current.currentShelterName}에 잘 도착하셨습니다. 안내를 종료합니다.`,
+          );
+          if (appWindow.confetti)
+            appWindow.confetti({
+              particleCount: 150,
+              spread: 70,
+              origin: { y: 0.6 },
+              zIndex: 10001,
+            });
+          if (state.current.watchId !== null)
+            navigator.geolocation.clearWatch(state.current.watchId);
           return;
         }
-      }
 
-      for (let i = 0; i < state.current.routeSteps.length; i++) {
-        if (i <= state.current.lastSpokenStep) continue;
-        const step = state.current.routeSteps[i];
-        if (getDistance(curLat, curLng, step.lat, step.lng) < 40) {
-          state.current.lastSpokenStep = i;
-          const nextStep = state.current.routeSteps[i + 1] ? ` 그 다음은 ${state.current.routeSteps[i + 1].instruction}` : "";
-          speak(`이제 ${step.instruction}${nextStep}`);
-          break;
+        if (state.current.polyline && !state.current.isRerouting) {
+          const path = state.current.polyline.getPath();
+          let minDistance = Infinity;
+          path.forEach((p) => {
+            const d = getDistance(curLat, curLng, p.getLat(), p.getLng());
+            if (d < minDistance) minDistance = d;
+          });
+          if (minDistance > 50) {
+            state.current.isRerouting = true;
+            speak("경로를 벗어났습니다. 현재 위치에서 다시 길을 찾습니다.");
+            findRoute(
+              state.current.currentEndLat,
+              state.current.currentEndLng,
+              state.current.currentShelterName,
+            );
+            return;
+          }
         }
-      }
-    }, null, { enableHighAccuracy: true });
+
+        for (let i = 0; i < state.current.routeSteps.length; i++) {
+          if (i <= state.current.lastSpokenStep) continue;
+          const step = state.current.routeSteps[i];
+          if (getDistance(curLat, curLng, step.lat, step.lng) < 40) {
+            state.current.lastSpokenStep = i;
+            const nextStep = state.current.routeSteps[i + 1]
+              ? ` 그 다음은 ${state.current.routeSteps[i + 1].instruction}`
+              : "";
+            speak(`이제 ${step.instruction}${nextStep}`);
+            break;
+          }
+        }
+      },
+      null,
+      { enableHighAccuracy: true },
+    );
+  };
+
+  const initMarkers = (data: Shelter[]) => {
+    data.forEach((s) => {
+      const marker = new appWindow.kakao.maps.Marker({
+        position: new appWindow.kakao.maps.LatLng(s.lat, s.lng),
+        map: mapInstance.current,
+      });
+      const content = document.createElement("div");
+      content.style.cssText =
+        "padding:10px; font-size:14px; color:black; min-width:150px; background:white; border-radius:8px;";
+      content.innerHTML = `<strong>${s.name}</strong><br><button id="nav-btn-${s.name.replace(/\s/g, "")}" style="margin-top:10px; cursor:pointer; width:100%; height:35px; background:#4CAF50; color:white; border:none; border-radius:5px; font-weight:bold;">🚶 길안내 시작</button>`;
+      const infowindow = new appWindow.kakao.maps.InfoWindow({
+        content: content,
+        removable: true,
+      });
+      appWindow.kakao.maps.event.addListener(marker, "click", () => {
+        const map = mapInstance.current;
+        if (!map) return;
+
+        if (!state.current.openedInfowindows.includes(infowindow)) {
+          if (state.current.openedInfowindows.length >= 3) {
+            const oldest = state.current.openedInfowindows.shift();
+            if (oldest) oldest.close();
+          }
+          infowindow.open(map, marker);
+          state.current.openedInfowindows.push(infowindow);
+          setTimeout(() => {
+            const btn = document.getElementById(
+              `nav-btn-${s.name.replace(/\s/g, "")}`,
+            );
+            if (btn) btn.onclick = () => findRoute(s.lat, s.lng, s.name);
+          }, 100);
+        }
+      });
+    });
   };
 
   const findRoute = (endLat: number, endLng: number, shelterName: string) => {
-    state.current.openedInfowindows.forEach((iw: any) => iw.close());
+    state.current.openedInfowindows.forEach((iw) => iw.close());
     state.current.openedInfowindows = [];
     if (state.current.watchId !== null) {
       navigator.geolocation.clearWatch(state.current.watchId);
@@ -156,39 +373,73 @@ export default function MapNavigation() {
     navigator.geolocation.getCurrentPosition((pos) => {
       const { latitude: startLat, longitude: startLng } = pos.coords;
       const url = `https://router.project-osrm.org/route/v1/foot/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson&steps=true&continue_straight=true`;
-      fetch(url).then((res) => res.json()).then((data) => {
-        if (data.code === "Ok") {
-          const route = data.routes[0];
-          const linePath = route.geometry.coordinates.map((c: any) => new newWindow.kakao.maps.LatLng(c[1], c[0]));
-          state.current.polyline = new newWindow.kakao.maps.Polyline({ path: linePath, strokeWeight: 8, strokeColor: "#3301fc", strokeOpacity: 0.8 });
-          state.current.polyline.setMap(mapInstance.current);
-          route.legs[0].steps.forEach((step: any) => {
-            const m = step.maneuver;
-            if (m.modifier && (m.modifier.includes("u-turn") || m.modifier.includes("sharp"))) return;
-            const dist = Math.round(step.distance);
-            let stepText = m.type === "depart" ? "안내를 시작합니다. " : m.type === "arrive" ? "목적지 근처에 도착했습니다. " : `${dist > 10 ? dist + "미터 직진 후 " : ""}${m.modifier === "left" ? "왼쪽으로 꺾으세요" : m.modifier === "right" ? "오른쪽으로 꺾으세요" : "앞으로 이동하세요"}`;
-            state.current.routeSteps.push({ lat: m.location[1], lng: m.location[0], instruction: stepText });
-          });
-          const bounds = new newWindow.kakao.maps.LatLngBounds();
-          linePath.forEach((p: any) => bounds.extend(p));
-          mapInstance.current.setBounds(bounds);
-          if (!state.current.isRerouting) {
-            const duration = Math.ceil(route.distance / 50);
-            speak(`${shelterName}까지 안내를 시작합니다. 약 ${duration}분 정도 걸립니다.`);
+      fetch(url)
+        .then((res) => res.json())
+        .then((data: OsrmResponse) => {
+          if (data.code === "Ok") {
+            const map = mapInstance.current;
+            if (!map) return;
+
+            const route = data.routes[0];
+            const linePath = route.geometry.coordinates.map(
+              (c) => new appWindow.kakao.maps.LatLng(c[1], c[0]),
+            );
+            state.current.polyline = new appWindow.kakao.maps.Polyline({
+              path: linePath,
+              strokeWeight: 8,
+              strokeColor: "#3301fc",
+              strokeOpacity: 0.8,
+            });
+            state.current.polyline.setMap(map);
+            route.legs[0].steps.forEach((step) => {
+              const m = step.maneuver;
+              if (
+                m.modifier &&
+                (m.modifier.includes("u-turn") || m.modifier.includes("sharp"))
+              )
+                return;
+              const dist = Math.round(step.distance);
+              const stepText =
+                m.type === "depart"
+                  ? "안내를 시작합니다. "
+                  : m.type === "arrive"
+                    ? "목적지 근처에 도착했습니다. "
+                    : `${dist > 10 ? dist + "미터 직진 후 " : ""}${m.modifier === "left" ? "왼쪽으로 꺾으세요" : m.modifier === "right" ? "오른쪽으로 꺾으세요" : "앞으로 이동하세요"}`;
+              state.current.routeSteps.push({
+                lat: m.location[1],
+                lng: m.location[0],
+                instruction: stepText,
+              });
+            });
+            const bounds = new appWindow.kakao.maps.LatLngBounds();
+            linePath.forEach((p) => bounds.extend(p));
+            map.setBounds(bounds);
+            if (!state.current.isRerouting) {
+              const duration = Math.ceil(route.distance / 50);
+              speak(
+                `${shelterName}까지 안내를 시작합니다. 약 ${duration}분 정도 걸립니다.`,
+              );
+            }
+            state.current.isRerouting = false;
+            startTracking();
           }
-          state.current.isRerouting = false;
-          startTracking();
-        }
-      });
+        });
     });
   };
 
   useEffect(() => {
-    const handleOffline = () => { setIsOffline(true); speak("인터넷 연결이 끊어졌습니다."); };
-    const handleOnline = () => { setIsOffline(false); speak("인터넷이 다시 연결되었습니다."); };
+    const handleOffline = () => {
+      setIsOffline(true);
+      speak("인터넷 연결이 끊어졌습니다.");
+    };
+    const handleOnline = () => {
+      setIsOffline(false);
+      speak("인터넷이 다시 연결되었습니다.");
+    };
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
-    if (window.speechSynthesis.onvoiceschanged !== undefined) window.speechSynthesis.onvoiceschanged = loadVoices;
+    if (window.speechSynthesis.onvoiceschanged !== undefined)
+      window.speechSynthesis.onvoiceschanged = loadVoices;
     loadVoices();
 
     const script = document.createElement("script");
@@ -196,37 +447,24 @@ export default function MapNavigation() {
     script.async = true;
     document.head.appendChild(script);
     script.onload = () => {
-      newWindow.kakao.maps.load(() => {
-        mapInstance.current = new newWindow.kakao.maps.Map(mapContainer.current, { center: new newWindow.kakao.maps.LatLng(37.5665, 126.978), level: 4 });
-        fetch("http://localhost:8000/api/shelters").then((res) => res.json()).then((data) => initMarkers(data));
+      const container = mapContainer.current;
+      if (!container) return;
+      appWindow.kakao.maps.load(() => {
+        mapInstance.current = new appWindow.kakao.maps.Map(container, {
+          center: new appWindow.kakao.maps.LatLng(37.5665, 126.978),
+          level: 4,
+        });
+        fetch("http://localhost:8000/api/shelters")
+          .then((res) => res.json())
+          .then((data) => initMarkers(data));
       });
     };
     return () => {
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online", handleOnline);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const initMarkers = (data: any[]) => {
-    data.forEach((s: any) => {
-      const marker = new newWindow.kakao.maps.Marker({ position: new newWindow.kakao.maps.LatLng(s.lat, s.lng), map: mapInstance.current });
-      const content = document.createElement("div");
-      content.style.cssText = "padding:10px; font-size:14px; color:black; min-width:150px; background:white; border-radius:8px;";
-      content.innerHTML = `<strong>${s.name}</strong><br><button id="nav-btn-${s.name.replace(/\s/g, "")}" style="margin-top:10px; cursor:pointer; width:100%; height:35px; background:#4CAF50; color:white; border:none; border-radius:5px; font-weight:bold;">🚶 길안내 시작</button>`;
-      const infowindow = new newWindow.kakao.maps.InfoWindow({ content: content, removable: true });
-      newWindow.kakao.maps.event.addListener(marker, "click", () => {
-        if (!state.current.openedInfowindows.includes(infowindow)) {
-          if (state.current.openedInfowindows.length >= 3) state.current.openedInfowindows.shift().close();
-          infowindow.open(mapInstance.current, marker);
-          state.current.openedInfowindows.push(infowindow);
-          setTimeout(() => {
-            const btn = document.getElementById(`nav-btn-${s.name.replace(/\s/g, "")}`);
-            if (btn) btn.onclick = () => findRoute(s.lat, s.lng, s.name);
-          }, 100);
-        }
-      });
-    });
-  };
 
   const isPlusDisabled = fontSize >= 36;
   const isMinusDisabled = fontSize <= 16;
@@ -234,33 +472,67 @@ export default function MapNavigation() {
   return (
     <div style={{ width: "100%", height: "100vh", position: "relative" }}>
       {showWelcome && (
-        <div style={(welcomeLayerStyle as any)}>
+        <div style={welcomeLayerStyle}>
           <div style={{ fontSize: "80px", marginBottom: "20px" }}>🔊</div>
           <h1 style={{ fontSize: "30px" }}>반갑습니다!</h1>
-          <p style={{ fontSize: "22px" }}>안내를 위해 <b>소리를 크게</b> 키워주세요.</p>
-          <button onClick={startApp} style={confirmButtonStyle}>확인했습니다</button>
+          <p style={{ fontSize: "22px" }}>
+            안내를 위해 <b>소리를 크게</b> 키워주세요.
+          </p>
+          <button onClick={startApp} style={confirmButtonStyle}>
+            확인했습니다
+          </button>
         </div>
       )}
       <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
-      <div style={(uiWrapperStyle as any)}>
+      <div style={uiWrapperStyle}>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <button onClick={() => speak(subtitle.replace(/<br>/g, ""))} style={buttonStyle}>🔄 다시듣기</button>
+          <button
+            onClick={() => speak(subtitle.replace(/<br>/g, ""))}
+            style={buttonStyle}
+          >
+            🔄 다시듣기
+          </button>
           <div style={{ display: "flex", gap: "5px" }}>
-            <button onClick={() => setFontSize((f: number) => Math.min(36, f + 4))} disabled={isPlusDisabled} style={{ ...subButtonStyle, backgroundColor: isPlusDisabled ? "#e0e0e0" : "white" }}>글자 +</button>
-            <button onClick={() => setFontSize((f: number) => Math.max(16, f - 4))} disabled={isMinusDisabled} style={{ ...subButtonStyle, backgroundColor: isMinusDisabled ? "#e0e0e0" : "white" }}>글자 -</button>
+            <button
+              onClick={() => setFontSize((f) => Math.min(36, f + 4))}
+              disabled={isPlusDisabled}
+              style={{
+                ...subButtonStyle,
+                backgroundColor: isPlusDisabled ? "#e0e0e0" : "white",
+              }}
+            >
+              글자 +
+            </button>
+            <button
+              onClick={() => setFontSize((f) => Math.max(16, f - 4))}
+              disabled={isMinusDisabled}
+              style={{
+                ...subButtonStyle,
+                backgroundColor: isMinusDisabled ? "#e0e0e0" : "white",
+              }}
+            >
+              글자 -
+            </button>
           </div>
         </div>
-        <div style={{ ...subtitleBoxStyle, fontSize: `${fontSize}px`, backgroundColor: isOffline ? 
-        "rgba(200, 0, 0, 0.9)" : "rgba(0, 0, 0, 0.85)" } as any}>
+        <div
+          style={{
+            ...subtitleBoxStyle,
+            fontSize: `${fontSize}px`,
+            backgroundColor: isOffline
+              ? "rgba(200, 0, 0, 0.9)"
+              : "rgba(0, 0, 0, 0.85)",
+          }}
+        >
           <span dangerouslySetInnerHTML={{ __html: `🔊 ${subtitle}` }} />
         </div>
       </div>
     </div>
   );
-};
+}
 
 // --- 스타일 정의 (지민님 코드에서 빠졌던 부분들 추가) ---
-const welcomeLayerStyle = {
+const welcomeLayerStyle: React.CSSProperties = {
   position: "fixed",
   top: 0,
   left: 0,
@@ -276,7 +548,7 @@ const welcomeLayerStyle = {
   textAlign: "center",
 };
 
-const confirmButtonStyle = {
+const confirmButtonStyle: React.CSSProperties = {
   marginTop: "30px",
   padding: "20px 50px",
   fontSize: "24px",
@@ -288,7 +560,7 @@ const confirmButtonStyle = {
   cursor: "pointer",
 };
 
-const uiWrapperStyle = {
+const uiWrapperStyle: React.CSSProperties = {
   position: "absolute",
   bottom: "20px",
   left: "50%",
@@ -300,7 +572,7 @@ const uiWrapperStyle = {
   gap: "10px",
 };
 
-const buttonStyle = {
+const buttonStyle: React.CSSProperties = {
   padding: "12px",
   background: "#FF9800",
   color: "white",
@@ -311,7 +583,7 @@ const buttonStyle = {
   boxShadow: "0 4px 8px rgba(0,0,0,0.3)",
 };
 
-const subButtonStyle = {
+const subButtonStyle: React.CSSProperties = {
   padding: "12px 18px",
   border: "1px solid #ccc",
   borderRadius: "10px",
@@ -319,7 +591,7 @@ const subButtonStyle = {
   cursor: "pointer",
 };
 
-const subtitleBoxStyle = {
+const subtitleBoxStyle: React.CSSProperties = {
   color: "white",
   padding: "20px",
   borderRadius: "15px",
